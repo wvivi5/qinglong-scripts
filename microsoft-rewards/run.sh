@@ -3,6 +3,10 @@
 set -eu
 export REWARDS_DATA_DIR="${REWARDS_DATA_DIR:-/ql/data/rewards-data}"
 export REWARDS_NOTIFY="${REWARDS_NOTIFY:-1}"
+# 网页通道（搜索/活动）在当前环境不可用（rewards.bing.com 一律 302 到 /Signin），
+# 默认关闭，避免每小时失败并刷屏通知。需要时可显式设成 1 覆盖。
+export REWARDS_SEARCH="${REWARDS_SEARCH:-0}"
+export REWARDS_PROMO="${REWARDS_PROMO:-0}"
 [ -f /ql/data/config/config.sh ] && . /ql/data/config/config.sh
 # 青龙执行 task 时 $0 可能不带目录，导致 dirname 算错；优先用固定路径，并做多路径兜底。
 script_dir=""
