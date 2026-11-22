@@ -4,7 +4,16 @@ set -eu
 export REWARDS_DATA_DIR="${REWARDS_DATA_DIR:-/ql/data/rewards-data}"
 export REWARDS_NOTIFY="${REWARDS_NOTIFY:-1}"
 [ -f /ql/data/config/config.sh ] && . /ql/data/config/config.sh
-script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+# 青龙执行 task 时 $0 可能不带目录，导致 dirname 算错；优先用固定路径，并做多路径兜底。
+script_dir=""
+for _d in /ql/data/scripts/microsoft-rewards /ql/scripts/microsoft-rewards "$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd)"; do
+  if [ -n "$_d" ] && [ -f "$_d/rewards.js" ]; then script_dir="$_d"; break; fi
+done
+if [ -z "$script_dir" ]; then
+  printf '%s\n' '找不到 rewards.js，请检查脚本目录是否完整。'
+  exit 1
+fi
+printf '%s\n' "脚本目录: $script_dir"
 # 仅 App 端（签到/阅读）时不需要浏览器 Cookie，只要有 refresh_token 即可运行。
 # 若开启了网页功能（REWARDS_SEARCH / REWARDS_PROMO 非 0），才要求 Cookie 非空。
 if ! node -e '
