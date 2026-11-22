@@ -9,7 +9,7 @@ const path = require('node:path');
 const net = require('node:net');
 const { createHash, timingSafeEqual } = require('node:crypto');
 
-const BODY_LIMIT = 64 * 1024;
+const BODY_LIMIT = 512 * 1024;
 const BODY_TIMEOUT = 10_000;
 const RESPONSE_TIMEOUT = 35_000;
 const REPLAY_TTL = 10 * 60_000;
@@ -127,6 +127,7 @@ function validateCookies(body) {
     throw new RequestError(400, 'userAgent 无效。');
   }
   const unique = new Map();
+  let skippedCount = 0;
   for (const cookie of body.cookies) {
     if (!cookie || typeof cookie !== 'object' || Array.isArray(cookie) ||
         typeof cookie.name !== 'string' || cookie.name.length > 256 ||
@@ -136,12 +137,12 @@ function validateCookies(body) {
         typeof cookie.domain !== 'string' || cookie.domain.length > 253 ||
         typeof cookie.path !== 'string' || !cookie.path.startsWith('/') ||
         cookie.path.length > 2048 || /[\x00-\x1f\x7f;]/.test(cookie.path)) {
-      throw new RequestError(400, 'Cookie 格式无效。');
+      skippedCount += 1; if (skippedCount <= 3) console.log('[cookie] skip: ' + String(cookie && cookie.name).slice(0, 32) + ' reason=format'); continue;
     }
     const domain = cookie.domain.toLowerCase();
     const hostname = domain.startsWith('.') ? domain.slice(1) : domain;
     if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*bing\.com$/.test(hostname)) {
-      throw new RequestError(400, '仅接受 bing.com 及其子域的 Cookie。');
+      skippedCount += 1; if (skippedCount <= 3) console.log('[cookie] skip: ' + String(cookie && cookie.name).slice(0, 32) + ' domain=' + String(cookie && cookie.domain).slice(0, 40)); continue;
     }
     for (const field of ['secure', 'httpOnly', 'hostOnly']) {
       if (cookie[field] !== undefined && typeof cookie[field] !== 'boolean') {
@@ -164,6 +165,10 @@ function validateCookies(body) {
     };
     if (cookie.expirationDate !== undefined) normalized.expirationDate = cookie.expirationDate;
     unique.set(JSON.stringify([domain, cookie.path, cookie.name]), normalized);
+  }
+  if (skippedCount) console.log('[cookie] skipped total=' + skippedCount + ' kept=' + unique.size);
+  if (unique.size === 0) {
+    throw new RequestError(400, '没有通过校验的 Cookie（共 ' + body.cookies.length + ' 条，全部被过滤）。');
   }
   return { cookies: [...unique.values()], userAgent: body.userAgent };
 }
@@ -201,6 +206,16 @@ function createSyncServer(options = {}) {
   const successfulCodes = new Map();
 
   async function handler(req, res) {
+    const t0 = Date.now();
+    console.log('[req] ' + req.method + ' ' + req.url
+      + ' ua=' + String(req.headers['user-agent'] || '-').slice(0, 40)
+      + ' len=' + String(req.headers['content-length'] || '-')
+      + ' origin=' + String(req.headers['origin'] || '-')
+      + ' ct=' + String(req.headers['content-type'] || '-').slice(0, 40));
+    res.once('close', () => {
+      console.log('[req] done ' + req.method + ' ' + req.url
+        + ' -> ' + res.statusCode + ' in ' + (Date.now() - t0) + 'ms');
+    });
     const timer = setTimeout(() => {
       reply(res, 504, { ok: false, error: '请求处理超时，请稍后检查同步状态。' });
     }, RESPONSE_TIMEOUT);
@@ -275,6 +290,7 @@ function createSyncServer(options = {}) {
         error: known ? error.message : '同步处理失败，请检查服务端配置或重新授权。',
       });
       if (!known) console.error('[rewards-sync] 同步处理失败；上游细节已隐藏。');
+      else console.log('[req] reject ' + req.url + ' -> ' + error.status + ' ' + error.message);
     } finally {
       clearTimeout(timer);
       if (!req.complete) req.resume();
